@@ -4,7 +4,7 @@ function currentPrice(now = new Date()) {
   const base = new Date("2026-09-01T00:00:00Z");
   const months = (now.getUTCFullYear() - base.getUTCFullYear()) * 12 +
     now.getUTCMonth() - base.getUTCMonth();
-  return 40 + Math.max(0, months) * 2;
+  return 45 + Math.max(0, months) * 2;
 }
 
 function normalize(text) {
