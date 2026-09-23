@@ -1,5 +1,5 @@
 const { sendWhatsAppMessage } = require("./send-whatsapp-message");
-const ORDER_HELP = "Para pedir, escribe cantidad, presentación, distrito y pago en un solo mensaje. Ejemplo: 4, medio kilo, San Borja, Yape. También puedes elegir 1 kilo. Un solo tipo de frasco por mensaje.";
+const ORDER_HELP = "Para pedir, escribe cantidad, presentación, distrito y pago en un solo mensaje. Ejemplos:\n4, medio kilo, San Borja, Yape\n4, kilo, San Borja, Yape";
 
 function catalogText(products) {
   return `Tenemos miel de abeja andina en dos presentaciones: 1 kilo a S/ ${products["PR-01"].price.toFixed(2)} y medio kilo (500 g) a S/ ${products["PR-02"].price.toFixed(2)}.`;
