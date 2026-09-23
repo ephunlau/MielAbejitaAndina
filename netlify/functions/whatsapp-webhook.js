@@ -73,6 +73,47 @@ function parseBody(event) {
   return JSON.parse(raw);
 }
 
+async function saveOrder(message, order, contacts) {
+  const url = process.env.SHEETS_WEBHOOK_URL;
+  const token = process.env.SHEETS_TOKEN;
+  if (!url || !token) throw new Error("Faltan SHEETS_WEBHOOK_URL o SHEETS_TOKEN en Netlify");
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(url)) {
+    throw new Error("SHEETS_WEBHOOK_URL debe ser la URL /exec de Google Apps Script");
+  }
+  if (!message.id) throw new Error("Falta el identificador del mensaje de WhatsApp");
+  const contact = (contacts || []).find(c => c.wa_id === message.from);
+  const result = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      token,
+      nombre: contact?.profile?.name || `Cliente WhatsApp ${message.from}`,
+      contacto: message.from,
+      cantidad: order.quantity,
+      distrito: order.district,
+      medio_pago: order.payment,
+      precio_unitario: currentPrice(),
+      canal: "WhatsApp",
+      message_id: message.id,
+    }),
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!result.ok) throw new Error(`Google Sheets respondió HTTP ${result.status}`);
+  const saved = await result.json();
+  if (saved.ok !== true || !saved.id_pedido || saved.version !== "v3-whatsapp") {
+    throw new Error("Google Sheets no confirmó el guardado con la versión v3-whatsapp");
+  }
+  return saved;
+}
+
+function savedReply(order, saved) {
+  return `Tu pedido ${saved.id_pedido} quedó registrado 🐝.\n` +
+    `Cantidad: ${order.quantity} frascos de 1 kilo\nDistrito: ${order.district}\n` +
+    `Forma de pago: ${order.payment}\nSubtotal de productos: S/ ${Number(saved.monto_total).toFixed(2)}\n\n` +
+    "El costo de envío y la entrega están pendientes de coordinación. El pago aún debe verificarse. " +
+    "Para modificar o cancelar este pedido, comunícate con Abejita Andina e indica su número.";
+}
+
 exports.handler = async (event) => {
   const verifyToken = process.env.VERIFY_TOKEN || "abejita_andina_2026";
   if (event.httpMethod === "GET") {
@@ -92,17 +133,25 @@ exports.handler = async (event) => {
         for (const message of change.value?.messages || []) {
           if (message.type !== "text" || !message.from) continue;
           console.log(`Mensaje de texto recibido; id: ${message.id || "sin id"}`);
-          await sendWhatsAppMessage(message.from, replyFor(message.text?.body || ""));
+          const text = message.text?.body || "";
+          const order = /\b(cancelar|salir|baja)\b/.test(normalize(text)) ? null : parseOrder(text);
+          if (order) {
+            const saved = await saveOrder(message, order, change.value?.contacts);
+            await sendWhatsAppMessage(message.from, savedReply(order, saved));
+          } else {
+            await sendWhatsAppMessage(message.from, replyFor(text));
+          }
         }
       }
     }
     return { statusCode: 200, body: "EVENT_RECEIVED" };
   } catch (error) {
     console.error("Error procesando webhook:", error.message);
-    return { statusCode: 200, body: "EVENT_RECEIVED" };
+    return { statusCode: 503, body: "RETRY_LATER" };
   }
 };
 
 exports.currentPrice = currentPrice;
 exports.replyFor = replyFor;
 exports.parseOrder = parseOrder;
+exports.saveOrder = saveOrder;
