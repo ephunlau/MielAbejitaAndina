@@ -1,13 +1,24 @@
 const { sendWhatsAppMessage } = require('./send-whatsapp-message');
 const crypto = require('node:crypto');
 
+async function readJson(response, source) {
+  try { return await response.json(); }
+  catch (_) {
+    // Do not log the response body: it may contain credentials or customer data.
+    const type = String(response.headers?.get('content-type') || 'desconocido').split(';')[0];
+    let host = 'desconocido';
+    try { host = new URL(response.url).hostname; } catch (_) {}
+    throw new Error(`${source}: respuesta no JSON (HTTP ${response.status}; tipo ${type}; servidor ${host}). Revisar URL, acceso y errores del servicio.`);
+  }
+}
+
 async function sheets(payload) {
   const url = process.env.SHEETS_WEBHOOK_URL;
   if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(url || '') || !process.env.SHEETS_TOKEN) throw new Error('Configuración de Sheets incompleta');
   const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...payload, token: process.env.SHEETS_TOKEN }), signal: AbortSignal.timeout(10000) });
   if (!response.ok) throw new Error(`Sheets HTTP ${response.status}`);
-  const data = await response.json();
+  const data = await readJson(response, `Sheets/${payload.accion || 'pedido'}`);
   if (!data.ok) throw new Error(`Sheets: ${data.code || 'operacion_fallida'}`);
   return data;
 }
@@ -49,10 +60,12 @@ En reply responde consultas o pide con naturalidad los datos faltantes. Nunca af
     const code = String(data.error?.code || 'api_error').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 60);
     throw new Error(`OpenAI HTTP ${response.status} (${code})`);
   }
-  const data = await response.json();
+  const data = await readJson(response, 'OpenAI');
   if (data.status !== 'completed') throw new Error('OpenAI respuesta incompleta');
   const output = (data.output || []).flatMap(item => item.content || []).filter(item => item.type === 'output_text').map(item => item.text).join('');
-  const result = JSON.parse(output);
+  let result;
+  try { result = JSON.parse(output); }
+  catch (_) { throw new Error('OpenAI: el contenido del modelo no es JSON válido'); }
   if (!['chat', 'order', 'confirm', 'cancel', 'cancel_saved', 'unsupported'].includes(result.intent) || !result.draft || typeof result.reply !== 'string') throw new Error('Respuesta del agente inválida');
   return result;
 }
@@ -201,7 +214,8 @@ exports.handler = async event => {
       if (process.env.WHATSAPP_PHONE_ID && value.metadata?.phone_number_id !== process.env.WHATSAPP_PHONE_ID) continue;
       for (const message of value.messages || []) {
         const reply = await processMessage(message);
-        await sendWhatsAppMessage(message.from, reply);
+        try { await sendWhatsAppMessage(message.from, reply); }
+        catch (error) { throw new Error(`Meta/envio: ${error.message}`); }
       }
     }
     return { statusCode: 200, body: 'EVENT_RECEIVED' };
@@ -215,3 +229,4 @@ exports.interpret = interpret;
 exports.complete = complete;
 exports.productsFrom = productsFrom;
 exports.validSignature = validSignature;
+exports.readJson = readJson;
