@@ -58,6 +58,7 @@ async function interpret(text, state, products) {
     body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-4o-mini', store: false, max_output_tokens: 1400,
       instructions: `Eres Killa, asesora de Abejita Andina. Conversa en español natural, breve y amable.
 Vendes miel andina de Arequipa. Solo usa el catálogo adjunto para precios y presentaciones. No aumentos mensuales, descuentos, promesas médicas, stock, horarios o envío inventados. Envío y verificación de pago se coordinan después.
+Para coordinar la entrega, el cliente puede comunicarse con Abejita Andina a los números +51 923 700 047 o +51 990 467 150. Si pregunta por el teléfono o contacto para la entrega, responde con esos dos números; no digas que el número se dará después ni inventes otros contactos.
 Tu tarea es interpretar el mensaje y devolver JSON; otro componente calcula y guarda. NUNCA digas que guardaste, confirmaste, cobraste o cancelaste un pedido registrado. NUNCA solicites formato con comas ni palabras clave.
 Recoge productId, cantidad de unidades, nombre explícito del cliente, dirección completa, distrito y pago. El teléfono procede del remitente y no debes pedirlo ni generarlo. Si el cliente responde solo con el nombre de un producto del catálogo, tómalo como una selección válida: conserva ese producto en el borrador y pregunta únicamente los demás datos que falten; no lo clasifiques como unsupported.
 PR-01 = miel de abeja andina en frasco de 1 kilo. PR-02 = miel de abeja andina en frasco de medio kilo/500 g. PR-03 = Maní dulce. PR-04 = Maní salado. Usa los nombres y precios del catálogo adjunto. Si solo dice 'quiero miel' pregunta qué presentación de miel prefiere y cuántas unidades. Si solo dice 'quiero maní' pregunta si lo quiere dulce o salado y cuántas unidades. Si el cliente menciona más de un producto en el mismo pedido -> unsupported y aclara de forma natural que por ahora debe registrarlos por separado, sin extraer un pedido parcial.
@@ -116,6 +117,11 @@ function cancelConfirmationIntent(text) {
 }
 function isCancellationRequest(text) {
   return /\b(cancelar|cancela|cancelalo|anular|anula)\b/.test(normalizeProductText(text));
+}
+function isDeliveryContactQuestion(text) {
+  const value = normalizeProductText(text);
+  return /\b(numero|telefono|celular|llamar|comunicar|contactar|contacto)\b/.test(value) &&
+    /\b(entrega|envio|pedido|abejita)\b/.test(value);
 }
 function isStaleWhatsAppMessage(message) {
   const timestampSeconds = Number(message.timestamp);
@@ -184,7 +190,10 @@ async function processMessage(message, deps = { sheets, interpret }) {
       const mentionedOrderId = extractOrderId(incoming);
       const cancellationAnswer = state.cancelPending ? cancelConfirmationIntent(incoming) : null;
       let decision;
-      if (state.cancelPending && mentionedOrderId && mentionedOrderId !== state.cancelPending.id && cancellationAnswer !== 'cancel') {
+      if (isDeliveryContactQuestion(incoming)) {
+        decision = { intent: 'chat', cancelOrderId: null, draft: state.draft || {},
+          reply: 'Para coordinar la entrega, comunícate con Abejita Andina al +51 923 700 047 o al +51 990 467 150. ¿En qué más puedo ayudarte? 🐝' };
+      } else if (state.cancelPending && mentionedOrderId && mentionedOrderId !== state.cancelPending.id && cancellationAnswer !== 'cancel') {
         decision = { intent: 'cancel_saved', cancelOrderId: mentionedOrderId, draft: state.draft || {}, reply: '' };
       } else if (state.cancelPending && cancellationAnswer) {
         decision = { intent: cancellationAnswer, cancelOrderId: null, draft: state.draft || {}, reply: '' };
@@ -241,7 +250,7 @@ async function processMessage(message, deps = { sheets, interpret }) {
           reply = 'El precio se actualizó. Revisa el nuevo total antes de confirmar:\n\n' + summary(draft, updated[draft.productId], message.from);
         } else {
           if (!saved.id_pedido || !Number.isFinite(saved.monto_total)) throw new Error('Guardado no confirmado');
-          reply = `Tu pedido ${saved.id_pedido} quedó registrado 🐝.\nNombre: ${draft.name}\nDirección: ${draft.address}, ${draft.district}\nCelular: +${message.from}\n${draft.quantity} unidad(es) de ${products[draft.productId].label}\nSubtotal: S/ ${saved.monto_total.toFixed(2)}\nPago: ${draft.payment}\n\nEl envío y la entrega se coordinan aparte. El pago queda pendiente de verificación.`;
+          reply = `Tu pedido ${saved.id_pedido} quedó registrado 🐝.\nNombre: ${draft.name}\nDirección: ${draft.address}, ${draft.district}\nCelular: +${message.from}\n${draft.quantity} unidad(es) de ${products[draft.productId].label}\nSubtotal: S/ ${saved.monto_total.toFixed(2)}\nPago: ${draft.payment}\n\nPara coordinar la entrega, comunícate al +51 923 700 047 o al +51 990 467 150. El pago queda pendiente de verificación.`;
           state.lastOrderId = saved.id_pedido;
           state.draft = null; state.pending = null;
         }
