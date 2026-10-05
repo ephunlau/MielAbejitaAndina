@@ -104,6 +104,19 @@ function explicitProductSelection(text, products) {
   });
   return matches.length === 1 ? matches[0].id : null;
 }
+function extractOrderId(text) {
+  const match = String(text || '').match(/\bP-WA-[a-f0-9]{20}\b/i);
+  return match ? 'P-WA-' + match[0].slice(5).toLowerCase() : null;
+}
+function cancelConfirmationIntent(text) {
+  const value = normalizeProductText(text);
+  if (/^(?:no\b|mejor no\b|ya no\b|no quiero\b|mantener el pedido\b|deja el pedido\b)/.test(value)) return 'cancel';
+  if (/^(?:si\b|ok\b|claro\b|dale\b|procede\b|confirmo\b|confirmar\b|adelante\b|cancela\b|cancelalo\b|hazlo\b)/.test(value)) return 'confirm';
+  return null;
+}
+function isCancellationRequest(text) {
+  return /\b(cancelar|cancela|cancelalo|anular|anula)\b/.test(normalizeProductText(text));
+}
 function preserveDraftWithProduct(raw, previous, productId) {
   const merged = cleanDraft(previous);
   const incoming = cleanDraft(raw);
@@ -159,7 +172,18 @@ async function processMessage(message, deps = { sheets, interpret }) {
     if (!incoming.trim()) {
       reply = 'Por ahora puedo leer mensajes de texto. Cuéntame por escrito qué deseas pedir 🐝.';
     } else {
-      const decision = await deps.interpret(incoming, state, products);
+      const mentionedOrderId = extractOrderId(incoming);
+      const cancellationAnswer = state.cancelPending ? cancelConfirmationIntent(incoming) : null;
+      let decision;
+      if (state.cancelPending && mentionedOrderId && mentionedOrderId !== state.cancelPending.id && cancellationAnswer !== 'cancel') {
+        decision = { intent: 'cancel_saved', cancelOrderId: mentionedOrderId, draft: state.draft || {}, reply: '' };
+      } else if (state.cancelPending && cancellationAnswer) {
+        decision = { intent: cancellationAnswer, cancelOrderId: null, draft: state.draft || {}, reply: '' };
+      } else if (!state.cancelPending && mentionedOrderId && isCancellationRequest(incoming)) {
+        decision = { intent: 'cancel_saved', cancelOrderId: mentionedOrderId, draft: state.draft || {}, reply: '' };
+      } else {
+        decision = await deps.interpret(incoming, state, products);
+      }
       const selectedProduct = state.cancelPending ? null : explicitProductSelection(incoming, products);
       if (selectedProduct && !['cancel', 'cancel_saved'].includes(decision.intent)) {
         decision.intent = 'order';
@@ -167,7 +191,7 @@ async function processMessage(message, deps = { sheets, interpret }) {
       }
       const draft = cleanDraft(decision.draft);
       if (decision.intent === 'cancel_saved') {
-        const orderId = decision.cancelOrderId || state.lastOrderId;
+        const orderId = mentionedOrderId || decision.cancelOrderId || state.lastOrderId;
         state.cancelPending = null;
         state.pending = null;
         if (!orderId) reply = 'Indícame el número del pedido que deseas cancelar (empieza por P-WA-). Lo encontrarás en el mensaje de registro.';
