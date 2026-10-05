@@ -117,6 +117,12 @@ function cancelConfirmationIntent(text) {
 function isCancellationRequest(text) {
   return /\b(cancelar|cancela|cancelalo|anular|anula)\b/.test(normalizeProductText(text));
 }
+function isStaleWhatsAppMessage(message) {
+  const timestampSeconds = Number(message.timestamp);
+  if (!Number.isFinite(timestampSeconds) || timestampSeconds <= 0) return false;
+  const maxAgeMinutes = Math.max(1, Number(process.env.WHATSAPP_MAX_REPLY_AGE_MINUTES) || 15);
+  return Date.now() - timestampSeconds * 1000 > maxAgeMinutes * 60 * 1000;
+}
 function preserveDraftWithProduct(raw, previous, productId) {
   const merged = cleanDraft(previous);
   const incoming = cleanDraft(raw);
@@ -162,7 +168,10 @@ async function processMessage(message, deps = { sheets, interpret }) {
   if (!message.id || !/^\d{8,15}$/.test(message.from || '')) throw new Error('Mensaje inválido');
   const identity = { contacto: message.from, message_id: message.id };
   const begun = await deps.sheets({ accion: 'killa_begin', ...identity });
-  if (begun.replay) return begun.reply;
+  if (begun.replay) {
+    message.__killaReplay = true;
+    return begun.reply;
+  }
   const lease = begun.lease;
   try {
     const products = productsFrom(begun.productos);
@@ -249,7 +258,7 @@ async function processMessage(message, deps = { sheets, interpret }) {
       }
     }
     state.history = [...(state.history || []), { role: 'user', content: incoming.slice(0, 1000) }, { role: 'assistant', content: reply }].slice(-8);
-    await deps.sheets({ accion: 'killa_finish', ...identity, lease, state, reply });
+    await deps.sheets({ accion: 'killa_finish', ...identity, lease, state, reply, user_message: incoming, message_type: message.type || 'desconocido' });
     return reply;
   } catch (error) {
     await deps.sheets({ accion: 'killa_release', ...identity, lease }).catch(() => {});
@@ -279,7 +288,15 @@ exports.handler = async event => {
       const value = change.value || {};
       if (process.env.WHATSAPP_PHONE_ID && value.metadata?.phone_number_id !== process.env.WHATSAPP_PHONE_ID) continue;
       for (const message of value.messages || []) {
+        if (isStaleWhatsAppMessage(message)) {
+          console.info('[webhook] Mensaje antiguo ignorado; no se enviará una respuesta fuera de tiempo.');
+          continue;
+        }
         const reply = await timed('turno/procesamiento', () => processMessage(message));
+        if (message.__killaReplay) {
+          console.info('[webhook] Reintento duplicado reconocido; no se reenvía la respuesta.');
+          continue;
+        }
         try { await timed('WhatsApp/envio', () => sendWhatsAppMessage(message.from, reply)); }
         catch (error) { throw new Error(`Meta/envio: ${error.message}`); }
       }
