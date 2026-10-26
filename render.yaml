@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: killa-whatsapp
+    runtime: node
+    plan: free
+    buildCommand: node --check render-server.cjs && node --check netlify/functions/whatsapp-webhook.js
+    startCommand: node render-server.cjs
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_ID
+        sync: false
+      - key: SHEETS_WEBHOOK_URL
+        sync: false
+      - key: SHEETS_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: DAILY_HEALTH_TOKEN
+        sync: false
+      - key: HEALTH_CHECK_TO
+        value: '51990467150'
+      - key: HEALTH_CHECK_TEMPLATE_NAME
+        value: killa_daily_health
+      - key: BUSINESS_PHONE
+        value: '51903214366'
+      - key: GRAPH_API_VERSION
+        value: v23.0
