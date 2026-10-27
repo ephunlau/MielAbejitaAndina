@@ -36,7 +36,16 @@ async function dailyHealthCheck() {
     }),
     signal: AbortSignal.timeout(20000),
   });
-  if (!openAiResponse.ok) throw new Error('openai_http_' + openAiResponse.status);
+  if (!openAiResponse.ok) {
+  const detail = await openAiResponse.text();
+  console.error(
+    '[daily-health] OpenAI HTTP ' +
+      openAiResponse.status +
+      ': ' +
+      detail.slice(0, 1000)
+  );
+  throw new Error('openai_http_' + openAiResponse.status);
+}
   const openAiResult = await openAiResponse.json().catch(() => null);
   if (openAiResult?.status !== 'completed') throw new Error('openai_incomplete');
 
