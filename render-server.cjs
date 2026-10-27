@@ -62,7 +62,7 @@ async function dailyHealthCheck() {
       messaging_product: 'whatsapp',
       to: recipient,
       type: 'template',
-      template: { name: templateName, language: { code: 'es' } },
+      template: { name: templateName, language: { code: 'es_PE' } },
     }),
     signal: AbortSignal.timeout(20000),
   });
