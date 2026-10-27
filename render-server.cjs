@@ -83,8 +83,10 @@ function createServer(handler) {
       if (url.pathname === '/health' && req.method === 'GET') return send(200, 'ok');
       if (url.pathname === '/daily-health-check') {
         if (req.method !== 'POST') return send(405, 'Method not allowed', { Allow: 'POST' });
-        if (!timingSafeTokenMatches(req.headers.authorization, process.env.DAILY_HEALTH_TOKEN)) {
-          return send(403, 'Forbidden');
+     console.info('[daily-health] request received');
+      if (!timingSafeTokenMatches(req.headers.authorization, process.env.DAILY_HEALTH_TOKEN)) {
+        console.warn('[daily-health] rejected: invalid token');
+        return send(403, 'Forbidden');
         }
         let requestBytes = 0;
         for await (const chunk of req) {
