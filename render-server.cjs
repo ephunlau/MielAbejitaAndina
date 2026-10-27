@@ -31,7 +31,7 @@ async function dailyHealthCheck() {
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       store: false,
-      max_output_tokens: 8,
+      max_output_tokens: 16,
       input: 'Responde únicamente OK.',
     }),
     signal: AbortSignal.timeout(20000),
